@@ -10,7 +10,7 @@ struct ScreenConfig {
     bool silent = false;
     int volume = 100;
     bool no_auto_mute = false;
-    int fps = 30;
+    int fps = -1; // -1 means use native video frame rate
     std::string scaling = "fit"; // stretch, fit, fill, default
 };
 
@@ -32,7 +32,7 @@ struct Config {
     bool default_silent = false;
     int default_volume = 100;
     bool default_no_auto_mute = false;
-    int default_fps = 30;
+    int default_fps = -1; // -1 means use native video frame rate
     std::string default_scaling = "fit";
 };
 
@@ -43,6 +43,18 @@ public:
     void print_help() const;
 
 private:
+    struct CurrentSettings {
+        bool is_window_mode = false;
+        WindowConfig window_config;
+        std::string screen_name = "default";
+        bool silent = false;
+        int volume = 100;
+        bool no_auto_mute = false;
+        int fps = -1; // -1 means use native video frame rate
+        std::string scaling = "fit";
+    };
+    
     void parse_window_geometry(const std::string& geometry, WindowConfig& config);
+    void apply_current_settings_to_config(Config& config, const CurrentSettings& current, const std::string& media_path);
     std::string program_name_;
 };

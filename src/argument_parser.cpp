@@ -14,128 +14,60 @@ Config ArgumentParser::parse(int argc, char* argv[]) {
         throw std::runtime_error("No arguments provided");
     }
     
-    ScreenConfig current_screen;
-    bool has_current_screen = false;
+    // ============================================================================
+    // COMPLETELY REWRITTEN ARGUMENT PARSER - CLEAN AND INTUITIVE LOGIC
+    // 
+    // NEW LOGIC:
+    // 1. All parameters before a media path apply to that media
+    // 2. Parameters can be specified in ANY order before the media path
+    // 3. No more complex dummy configs or order dependencies
+    // 4. Works the same for window mode and desktop background mode
+    // ============================================================================
     
-    // Default values that can be set globally before screen-specific configs
-    bool global_silent = false;
-    int global_volume = 100;
-    bool global_no_auto_mute = false;
-    int global_fps = 30;
-    std::string global_scaling = "fit";
+    // Current settings being built up (applied to next media file)
+    CurrentSettings current;
     
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         
-        if (arg == "--path-to-media" && i + 1 < argc) {
-            if (config.windowed_mode) {
-                // In windowed mode, assign to window config
-                config.window_config.media_path = argv[++i];
-            } else {
-                // In screen mode, assign to current screen
-                if (!has_current_screen) {
-                    // This is a global media path, create a default screen config
-                    current_screen.screen_name = "default";
-                    has_current_screen = true;
-                }
-                current_screen.media_path = argv[++i];
-            }
-        }
-        else if (arg == "--silent") {
-            if (has_current_screen) {
-                current_screen.silent = true;
-            } else {
-                global_silent = true;
-            }
-        }
-        else if (arg == "--volume" && i + 1 < argc) {
-            int volume = std::stoi(argv[++i]);
-            if (has_current_screen) {
-                current_screen.volume = volume;
-            } else {
-                global_volume = volume;
-            }
-        }
-        else if (arg == "--noautomute") {
-            if (has_current_screen) {
-                current_screen.no_auto_mute = true;
-            } else {
-                global_no_auto_mute = true;
-            }
-        }
-        else if (arg == "--fps" && i + 1 < argc) {
-            int fps = std::stoi(argv[++i]);
-            if (has_current_screen) {
-                current_screen.fps = fps;
-            } else {
-                global_fps = fps;
-            }
-        }
-        else if (arg == "--window" && i + 1 < argc) {
-            config.windowed_mode = true;
-            parse_window_geometry(argv[++i], config.window_config);
-            
-            // Apply current global scaling to window config
-            config.window_config.scaling = global_scaling;
-            
-            // If window mode is specified, clear any screen configurations
-            // as window mode takes precedence
-            config.screen_configs.clear();
-            has_current_screen = false;
+        if (arg == "--window" && i + 1 < argc) {
+            current.is_window_mode = true;
+            parse_window_geometry(argv[++i], current.window_config);
         }
         else if (arg == "--screen-root" && i + 1 < argc) {
-            // Save the previous screen config if it exists
-            if (has_current_screen) {
-                config.screen_configs.push_back(current_screen);
-            }
-            
-            // Start a new screen config
-            current_screen = ScreenConfig();
-            current_screen.screen_name = argv[++i];
-            
-            // Apply global defaults
-            current_screen.silent = global_silent;
-            current_screen.volume = global_volume;
-            current_screen.no_auto_mute = global_no_auto_mute;
-            current_screen.fps = global_fps;
-            current_screen.scaling = global_scaling;
-            
-            has_current_screen = true;
+            current.is_window_mode = false;
+            current.screen_name = argv[++i];
+        }
+        else if (arg == "--silent" || arg == "--mute") {
+            current.silent = true;
+        }
+        else if (arg == "--volume" && i + 1 < argc) {
+            current.volume = std::stoi(argv[++i]);
+        }
+        else if (arg == "--noautomute") {
+            current.no_auto_mute = true;
+        }
+        else if (arg == "--fps" && i + 1 < argc) {
+            current.fps = std::stoi(argv[++i]);
         }
         else if (arg == "--scaling" && i + 1 < argc) {
             std::string scaling = argv[++i];
             if (scaling != "stretch" && scaling != "fit" && scaling != "fill" && scaling != "default") {
                 throw std::runtime_error("Invalid scaling mode: " + scaling);
             }
-            if (config.windowed_mode) {
-                // In windowed mode, apply to window config
-                config.window_config.scaling = scaling;
-            } else if (has_current_screen) {
-                // In screen mode with current screen, apply to current screen
-                current_screen.scaling = scaling;
-            } else {
-                // Global default
-                global_scaling = scaling;
-            }
+            current.scaling = scaling;
+        }
+        else if (arg == "--path-to-media" && i + 1 < argc) {
+            std::string media_path = argv[++i];
+            apply_current_settings_to_config(config, current, media_path);
         }
         else if (arg == "--help" || arg == "-h") {
             print_help();
             exit(0);
         }
         else if (arg.find("--") != 0) {
-            // Assume it's a direct path to media
-            if (config.windowed_mode) {
-                // In windowed mode, assign directly to window config
-                config.window_config.media_path = arg;
-            } else {
-                // In screen mode, assign to current screen
-                if (!has_current_screen) {
-                    // This is a global media path, create a default screen config
-                    current_screen.screen_name = "default";
-                    has_current_screen = true;
-                }
-                current_screen.media_path = arg;
-            }
+            // Direct media path - apply current settings
+            apply_current_settings_to_config(config, current, arg);
         }
         else {
             std::cerr << "Unknown argument: " << arg << std::endl;
@@ -144,21 +76,13 @@ Config ArgumentParser::parse(int argc, char* argv[]) {
         }
     }
     
-    // Add the last screen config if it exists
-    if (has_current_screen) {
-        config.screen_configs.push_back(current_screen);
+    // Validation
+    if (config.windowed_mode && config.window_config.media_path.empty()) {
+        throw std::runtime_error("Window mode specified but no media path provided");
     }
-    
-    if (config.screen_configs.empty() && !config.windowed_mode) {
+    if (!config.windowed_mode && config.screen_configs.empty()) {
         throw std::runtime_error("No screen configurations provided");
     }
-    
-    // Set global defaults
-    config.default_silent = global_silent;
-    config.default_volume = global_volume;
-    config.default_no_auto_mute = global_no_auto_mute;
-    config.default_fps = global_fps;
-    config.default_scaling = global_scaling;
     
     return config;
 }
@@ -190,12 +114,49 @@ void ArgumentParser::parse_window_geometry(const std::string& geometry, WindowCo
     }
 }
 
+void ArgumentParser::apply_current_settings_to_config(Config& config, const CurrentSettings& current, const std::string& media_path) {
+    if (current.is_window_mode) {
+        // Window mode - clear any existing screen configs and set up window
+        config.windowed_mode = true;
+        config.screen_configs.clear();
+        
+        // Apply settings to window config
+        config.window_config = current.window_config;
+        config.window_config.media_path = media_path;
+        config.window_config.scaling = current.scaling;
+        
+        // Create a single screen config for compatibility with existing application logic
+        ScreenConfig window_screen_config;
+        window_screen_config.screen_name = "window";
+        window_screen_config.media_path = media_path;
+        window_screen_config.silent = current.silent;
+        window_screen_config.volume = current.volume;
+        window_screen_config.no_auto_mute = current.no_auto_mute;
+        window_screen_config.fps = current.fps;
+        window_screen_config.scaling = current.scaling;
+        config.screen_configs.push_back(window_screen_config);
+    } else {
+        // Screen mode - add a new screen configuration
+        config.windowed_mode = false;
+        
+        ScreenConfig screen_config;
+        screen_config.screen_name = current.screen_name;
+        screen_config.media_path = media_path;
+        screen_config.silent = current.silent;
+        screen_config.volume = current.volume;
+        screen_config.no_auto_mute = current.no_auto_mute;
+        screen_config.fps = current.fps;
+        screen_config.scaling = current.scaling;
+        config.screen_configs.push_back(screen_config);
+    }
+}
+
 void ArgumentParser::print_help() const {
     std::cout << "Linux Wallpaper Engine Extended - Media Background Application\n";
     std::cout << "Usage: " << program_name_ << " [OPTIONS] [path-to-media]\n\n";
     std::cout << "Options:\n";
     std::cout << "  --path-to-media <path>     Path to media file (video/gif/image)\n";
-    std::cout << "  --silent                   Mute background audio\n";
+    std::cout << "  --silent, --mute           Mute background audio\n";
     std::cout << "  --volume <val>             Set audio volume (0-100)\n";
     std::cout << "  --noautomute              Don't mute when other apps play audio\n";
     std::cout << "  --fps <val>               Limit frame rate\n";

@@ -6,8 +6,10 @@
 #include <chrono>
 #include <thread>
 #include <signal.h>
+#include <algorithm>
 
-Application::Application() : running_(false), should_exit_(false) {}
+Application::Application() : running_(false), should_exit_(false), 
+                           target_fps_(30), frame_duration_(33) {}
 
 Application::~Application() {
     shutdown();
@@ -39,6 +41,14 @@ bool Application::initialize(const Config& config) {
             return false;
         }
     }
+    
+    // Configure FPS limiting
+    target_fps_ = calculate_effective_fps();
+    frame_duration_ = std::chrono::milliseconds(1000 / target_fps_);
+    std::cout << "FPS limit set to " << target_fps_ << " (" << frame_duration_.count() << "ms per frame)" << std::endl;
+    
+    // Apply audio settings to media players
+    apply_audio_settings();
     
     std::cout << "Application initialized successfully" << std::endl;
     return true;
@@ -83,19 +93,19 @@ bool Application::setup_window_mode() {
             return false;
         }
         
-        // Apply default audio settings
-        if (config_.default_silent) {
-            window_media_player_->set_muted(true);
-        } else {
-            window_media_player_->set_volume(config_.default_volume);
+        // Start video playbook for continuous animation
+        if (!window_media_player_->play()) {
+            std::cerr << "Warning: Failed to start video playback" << std::endl;
         }
         
-        window_media_player_->set_fps_limit(config_.default_fps);
+        // FIXED: Set FPS limit AFTER starting playback so native frame rate is detected
+        // This allows -1 (native frame rate) to work correctly for windowed mode
+        int fps_setting = !config_.screen_configs.empty() ? config_.screen_configs[0].fps : config_.default_fps;
+        window_media_player_->set_fps_limit(fps_setting);
         
         // Set background with window-specific scaling
         ScalingMode scaling = parse_scaling_mode(config_.window_config.scaling);
         window_output_->set_background(config_.window_config.media_path, scaling);
-        
         
         // Use SDL2 window display (universal cross-platform solution)
         SDL2WindowDisplay* sdl2_display = dynamic_cast<SDL2WindowDisplay*>(window_output_.get());
@@ -103,12 +113,6 @@ bool Application::setup_window_mode() {
             
             // For video content, start video playback for continuous animation
             if (window_media_player_->get_media_type() == MediaType::VIDEO) {
-                
-                // Start video playback for continuous animation
-                if (!window_media_player_->play()) {
-                    std::cerr << "Warning: Failed to start video playback" << std::endl;
-                }
-                
                 // Render initial video frame
                 unsigned char* frame_data;
                 int frame_width, frame_height;
@@ -125,11 +129,7 @@ bool Application::setup_window_mode() {
                                                    scaling);
                 }
             }
-        } else {
         }
-        
-        // Start playback
-        window_media_player_->play();
     }
     
     return true;
@@ -205,11 +205,16 @@ bool Application::initialize_screen_instance(ScreenInstance& instance) {
             pulse_audio_.set_auto_mute_enabled(true);
         }
         
-        instance.media_player->set_fps_limit(instance.config.fps);
-        
         // Set background
         ScalingMode scaling = parse_scaling_mode(instance.config.scaling);
         instance.display_output->set_background(instance.config.media_path, scaling);
+        
+        // Start playback first so MediaPlayer can detect native frame rate
+        instance.media_player->play();
+        
+        // FIXED: Set FPS limit AFTER starting playback so native frame rate is detected
+        // This allows -1 (native frame rate) to work correctly
+        instance.media_player->set_fps_limit(instance.config.fps);
         
         // Render image if it's a static image
         if (instance.media_player->get_media_type() == MediaType::IMAGE) {
@@ -240,9 +245,6 @@ bool Application::initialize_screen_instance(ScreenInstance& instance) {
             // For videos, we need to render frames continuously in the update loop
             // Initial frame rendering will be handled in the update loop
         }
-        
-        // Start playback
-        instance.media_player->play();
     }
     
     instance.initialized = true;
@@ -271,7 +273,10 @@ void Application::run() {
 void Application::update_loop() {
     auto last_auto_mute_check = std::chrono::steady_clock::now();
     const auto auto_mute_check_interval = std::chrono::milliseconds(1000); // Check every second
+    auto last_frame_time = std::chrono::steady_clock::now();
     
+    std::cout << "Starting update loop with " << target_fps_ << " FPS target (" 
+              << frame_duration_.count() << "ms per frame)" << std::endl;
     
     while (running_ && !should_exit_) {
         auto now = std::chrono::steady_clock::now();
@@ -313,11 +318,24 @@ void Application::update_loop() {
                             break;
                         }
                         
-                        unsigned char* frame_data;
-                        int frame_width, frame_height;
-                        if (window_media_player_->get_video_frame(&frame_data, &frame_width, &frame_height)) {
-                            sdl2_display->render_video_frame(frame_data, frame_width, frame_height, scaling);
-                        } else {
+                        // FIXED VIDEO TIMING: Only decode frames when we need to display them
+                        // This prevents video from advancing faster than the display rate
+                        if (window_media_player_->should_display_frame()) {
+                            unsigned char* frame_data;
+                            int frame_width, frame_height;
+                            bool frame_available = false;
+                            
+                            // Only decode a new frame when it's time to display
+                            if (window_media_player_->get_video_frame_cpu(&frame_data, &frame_width, &frame_height)) {
+                                frame_available = true;
+                            } else if (window_media_player_->get_video_frame_ffmpeg(&frame_data, &frame_width, &frame_height)) {
+                                frame_available = true;
+                            }
+                            
+                            // Display the frame immediately since should_display_frame() returned true
+                            if (frame_available) {
+                                sdl2_display->render_video_frame(frame_data, frame_width, frame_height, scaling);
+                            }
                         }
                     }
                 } else if (window_media_player_->get_media_type() == MediaType::IMAGE) {
@@ -344,30 +362,40 @@ void Application::update_loop() {
                         if (instance.media_player->get_media_type() == MediaType::VIDEO) {
                             ScalingMode scaling = parse_scaling_mode(instance.config.scaling);
                             
-                            WaylandDisplay* wayland_display = dynamic_cast<WaylandDisplay*>(instance.display_output.get());
-                            X11Display* x11_display = dynamic_cast<X11Display*>(instance.display_output.get());
-                            
-                            if (wayland_display) {
-                                // PREFER CPU-based rendering for KDE Wayland stability
-                                unsigned char* frame_data;
-                                int frame_width, frame_height;
-                                if (instance.media_player->get_video_frame_cpu(&frame_data, &frame_width, &frame_height)) {
-                                    wayland_display->render_video_frame(frame_data, frame_width, frame_height, scaling);
-                                } else {
-                                    // Final fallback to FFmpeg if CPU extraction fails
-                                    if (instance.media_player->get_video_frame_ffmpeg(&frame_data, &frame_width, &frame_height)) {
-                                        wayland_display->render_video_frame(frame_data, frame_width, frame_height, scaling);
-                                    }
-                                }
-                            } else if (x11_display) {
-                                // Make context current (no-op for X11 but for API consistency)
-                                if (x11_display->make_egl_current()) {
+                            // FIXED: Apply FPS control at application level instead of decode level
+                            // Only render frame if enough time has passed according to target FPS
+                            if (instance.media_player->should_display_frame()) {
+                                WaylandDisplay* wayland_display = dynamic_cast<WaylandDisplay*>(instance.display_output.get());
+                                X11Display* x11_display = dynamic_cast<X11Display*>(instance.display_output.get());
+                                
+                                if (wayland_display) {
+                                    // PREFER CPU-based rendering for KDE Wayland stability
                                     unsigned char* frame_data;
                                     int frame_width, frame_height;
-                                    if (instance.media_player->get_video_frame(&frame_data, &frame_width, &frame_height)) {
-                                        x11_display->render_video_frame(frame_data, frame_width, frame_height, scaling);
+                                    if (instance.media_player->get_video_frame_cpu(&frame_data, &frame_width, &frame_height)) {
+                                        wayland_display->render_video_frame(frame_data, frame_width, frame_height, scaling);
+                                    } else {
+                                        // Final fallback to FFmpeg if CPU extraction fails
+                                        if (instance.media_player->get_video_frame_ffmpeg(&frame_data, &frame_width, &frame_height)) {
+                                            wayland_display->render_video_frame(frame_data, frame_width, frame_height, scaling);
+                                        }
+                                    }
+                                } else if (x11_display) {
+                                    // Make context current (no-op for X11 but for API consistency)
+                                    if (x11_display->make_egl_current()) {
+                                        unsigned char* frame_data;
+                                        int frame_width, frame_height;
+                                        if (instance.media_player->get_video_frame(&frame_data, &frame_width, &frame_height)) {
+                                            x11_display->render_video_frame(frame_data, frame_width, frame_height, scaling);
+                                        }
                                     }
                                 }
+                            } else {
+                                // Still need to advance video timing even if not displaying
+                                // This ensures video runs at native speed regardless of display FPS
+                                unsigned char* dummy_frame_data;
+                                int dummy_width, dummy_height;
+                                instance.media_player->get_video_frame_cpu(&dummy_frame_data, &dummy_width, &dummy_height);
                             }
                         }
                     }
@@ -384,14 +412,30 @@ void Application::update_loop() {
             last_auto_mute_check = now;
         }
         
-        // Sleep to prevent excessive CPU usage - use longer intervals for KDE Wayland stability
-        std::this_thread::sleep_for(std::chrono::milliseconds(33)); // ~30 FPS update rate for better stability
+        // Adaptive FPS limiting based on configuration
+        auto elapsed_since_last_frame = now - last_frame_time;
+        if (elapsed_since_last_frame < frame_duration_) {
+            auto sleep_time = frame_duration_ - elapsed_since_last_frame;
+            std::this_thread::sleep_for(sleep_time);
+        }
+        last_frame_time = std::chrono::steady_clock::now();
     }
     
 }
 
 void Application::update_auto_mute() {
     bool should_mute = pulse_audio_.should_mute_background_audio();
+    static bool last_mute_state = false;
+    
+    // Only log when mute state changes to avoid spam
+    if (should_mute != last_mute_state) {
+        if (should_mute) {
+            std::cout << "INFO: Auto-mute triggered - other applications detected playing audio" << std::endl;
+        } else {
+            std::cout << "INFO: Auto-mute released - no conflicting audio detected" << std::endl;
+        }
+        last_mute_state = should_mute;
+    }
     
     if (config_.windowed_mode) {
         if (window_media_player_ && !config_.screen_configs.empty() && 
@@ -447,4 +491,97 @@ void Application::shutdown() {
 void Application::handle_signal(int signal) {
     std::cout << "Received signal " << signal << ", shutting down..." << std::endl;
     should_exit_ = true;
+}
+
+int Application::calculate_effective_fps() const {
+    int effective_fps = 30; // Default FPS fallback
+    
+    if (config_.windowed_mode) {
+        // For window mode, check if FPS was explicitly set
+        if (!config_.screen_configs.empty()) {
+            if (config_.screen_configs[0].fps > 0) {
+                effective_fps = config_.screen_configs[0].fps;
+            } else {
+                // fps == -1: Use native video frame rate if available
+                if (window_media_player_ && window_media_player_->is_video()) {
+                    // Try to get native frame rate from the media player
+                    // For now, use a reasonable default for application loop
+                    effective_fps = 60; // Higher app FPS for smooth native video playback
+                } else {
+                    effective_fps = 30; // Default for non-video content
+                }
+            }
+        } else {
+            if (config_.default_fps > 0) {
+                effective_fps = config_.default_fps;
+            } else {
+                // Use native video frame rate logic
+                effective_fps = window_media_player_ && window_media_player_->is_video() ? 60 : 30;
+            }
+        }
+    } else {
+        // For background mode, find the highest FPS among all screen instances
+        // This ensures smooth playback for the most demanding screen
+        bool found_explicit_fps = false;
+        for (const auto& instance : screen_instances_) {
+            if (instance.initialized && instance.config.fps > 0) {
+                effective_fps = std::max(effective_fps, instance.config.fps);
+                found_explicit_fps = true;
+            }
+        }
+        
+        // If no explicit FPS was set and we have video content, use higher app FPS
+        if (!found_explicit_fps) {
+            for (const auto& instance : screen_instances_) {
+                if (instance.initialized && instance.media_player && 
+                    instance.media_player->is_video()) {
+                    effective_fps = 60; // Higher app FPS for native video playback
+                    break;
+                }
+            }
+        }
+        
+        // Fallback to default FPS if no instances are initialized
+        if (screen_instances_.empty()) {
+            effective_fps = config_.default_fps > 0 ? config_.default_fps : 30;
+        }
+    }
+    
+    // Clamp to reasonable range (1-120 FPS)
+    return std::max(1, std::min(120, effective_fps));
+}
+
+void Application::apply_audio_settings() {
+    if (config_.windowed_mode) {
+        if (window_media_player_) {
+            // Apply audio settings from first screen config or defaults
+            if (!config_.screen_configs.empty()) {
+                const auto& screen_config = config_.screen_configs[0];
+                window_media_player_->set_volume(screen_config.volume);
+                window_media_player_->set_muted(screen_config.silent);
+                
+                std::cout << "Applied window audio settings: volume=" << screen_config.volume 
+                          << "%, muted=" << (screen_config.silent ? "yes" : "no") << std::endl;
+            } else {
+                // Use global defaults
+                window_media_player_->set_volume(config_.default_volume);
+                window_media_player_->set_muted(config_.default_silent);
+                
+                std::cout << "Applied window default audio settings: volume=" << config_.default_volume 
+                          << "%, muted=" << (config_.default_silent ? "yes" : "no") << std::endl;
+            }
+        }
+    } else {
+        // Apply audio settings to each screen instance
+        for (auto& instance : screen_instances_) {
+            if (instance.initialized && instance.media_player) {
+                instance.media_player->set_volume(instance.config.volume);
+                instance.media_player->set_muted(instance.config.silent);
+                
+                std::cout << "Applied screen '" << instance.config.screen_name 
+                          << "' audio settings: volume=" << instance.config.volume 
+                          << "%, muted=" << (instance.config.silent ? "yes" : "no") << std::endl;
+            }
+        }
+    }
 }

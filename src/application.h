@@ -40,12 +40,18 @@ private:
     std::atomic<bool> running_;
     std::atomic<bool> should_exit_;
     
+    // FPS limiting
+    int target_fps_;
+    std::chrono::milliseconds frame_duration_;
+    
     bool setup_screen_instances();
     bool setup_window_mode();
     bool initialize_screen_instance(ScreenInstance& instance);
     
     void update_loop();
     void update_auto_mute();
+    void apply_audio_settings();
     
     ScalingMode parse_scaling_mode(const std::string& scaling);
+    int calculate_effective_fps() const;
 };
