@@ -679,7 +679,8 @@ bool X11Display::render_to_image_buffer(const unsigned char* image_data, int img
             int buf_x = x + dest_x;
             int buf_y = y + dest_y;
             
-            if (buf_x >= width_ || buf_y >= height_) continue;
+            // CRITICAL FIX: Check for negative values to prevent segmentation fault in FILL mode
+            if (buf_x < 0 || buf_y < 0 || buf_x >= width_ || buf_y >= height_) continue;
             
             int src_idx = (src_y * img_width + src_x) * 4; // RGBA input
             int buf_idx = (buf_y * width_ + buf_x) * 4;   // RGBA buffer

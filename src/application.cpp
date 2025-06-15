@@ -298,12 +298,22 @@ void Application::update_loop() {
                 window_media_player_->update();
                 
                 // Render video frames continuously for windowed mode
+                // FIX: Use window_config.scaling instead of screen_configs[0].scaling for window mode
+                ScalingMode scaling = parse_scaling_mode(config_.window_config.scaling);
+                
+                // ============================================================================
+                // APPLICATION UPDATE LOOP DEBUG FOR SDL2 FLICKERING INVESTIGATION
+                // ============================================================================
+                static int app_update_call_count = 0;
+                app_update_call_count++;
+                
+                std::cout << "DEBUG: *** APP UPDATE DEBUG *** ====== Application update loop iteration " << app_update_call_count << " ======" << std::endl;
+                std::cout << "DEBUG: *** APP UPDATE DEBUG *** Parsed scaling mode: " << static_cast<int>(scaling) << " (0=STRETCH, 1=FIT, 2=FILL, 3=DEFAULT)" << std::endl;
+                
+                // Use SDL2 window display (universal solution)
+                SDL2WindowDisplay* sdl2_display = dynamic_cast<SDL2WindowDisplay*>(window_output_.get());
+                
                 if (window_media_player_->get_media_type() == MediaType::VIDEO) {
-                    ScalingMode scaling = config_.screen_configs.empty() ? ScalingMode::DEFAULT : 
-                                         parse_scaling_mode(config_.screen_configs[0].scaling);
-                    
-                    // Use SDL2 window display (universal solution)
-                    SDL2WindowDisplay* sdl2_display = dynamic_cast<SDL2WindowDisplay*>(window_output_.get());
                     if (sdl2_display) {
                         // Check if window should close
                         if (sdl2_display->should_close()) {
@@ -314,33 +324,28 @@ void Application::update_loop() {
                         unsigned char* frame_data;
                         int frame_width, frame_height;
                         if (window_media_player_->get_video_frame(&frame_data, &frame_width, &frame_height)) {
+                            std::cout << "DEBUG: *** APP UPDATE DEBUG *** About to call render_video_frame with scaling=" << static_cast<int>(scaling) << std::endl;
                             sdl2_display->render_video_frame(frame_data, frame_width, frame_height, scaling);
+                            std::cout << "DEBUG: *** APP UPDATE DEBUG *** render_video_frame completed" << std::endl;
+                        } else {
+                            std::cout << "DEBUG: *** APP UPDATE DEBUG *** No video frame available" << std::endl;
                         }
                     }
                 } else if (window_media_player_->get_media_type() == MediaType::IMAGE) {
-                    // Handle image rendering for SDL2 window display
-                    SDL2WindowDisplay* sdl2_display = dynamic_cast<SDL2WindowDisplay*>(window_output_.get());
-                    if (sdl2_display) {
-                        // Check if window should close
-                        if (sdl2_display->should_close()) {
-                            should_exit_ = true;
-                            break;
-                        }
-                        
-                        const unsigned char* image_data = window_media_player_->get_image_data();
-                        if (image_data) {
-                            ScalingMode scaling = config_.screen_configs.empty() ? ScalingMode::DEFAULT : 
-                                                 parse_scaling_mode(config_.screen_configs[0].scaling);
-                            sdl2_display->render_image_data(image_data, 
-                                                           window_media_player_->get_width(),
-                                                           window_media_player_->get_height(),
-                                                           scaling);
-                        }
+                    // For images, render immediately
+                    const unsigned char* image_data = window_media_player_->get_image_data();
+                    if (image_data && sdl2_display) {
+                        sdl2_display->render_image_data(image_data, 
+                                                       window_media_player_->get_width(),
+                                                       window_media_player_->get_height(),
+                                                       scaling);
                     }
                 }
             }
             if (window_output_) {
+                std::cout << "DEBUG: *** APP UPDATE DEBUG *** About to call window_output_->update()" << std::endl;
                 window_output_->update();
+                std::cout << "DEBUG: *** APP UPDATE DEBUG *** window_output_->update() completed" << std::endl;
             }
         } else {
             for (auto& instance : screen_instances_) {
