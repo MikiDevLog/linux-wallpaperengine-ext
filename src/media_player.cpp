@@ -167,14 +167,20 @@ void MediaPlayer::set_fps_limit(int fps) {
         
         if (target_display_fps_ > frame_rate_) {
             std::cout << "DEBUG: Display FPS > Video FPS - frames will be repeated for smooth display" << std::endl;
+            frame_rate_limiting_enabled_ = false;  // No frame skipping needed
         } else if (target_display_fps_ < frame_rate_) {
-            std::cout << "DEBUG: Display FPS < Video FPS - some video frames may be skipped" << std::endl;
+            std::cout << "DEBUG: Display FPS < Video FPS - some video frames will be skipped" << std::endl;
+            // Enable frame skipping explicitly for proper speed maintenance
+            frame_rate_limiting_enabled_ = true;
+            std::cout << "DEBUG: Frame skipping enabled for proper playback speed" << std::endl;
         } else {
             std::cout << "DEBUG: Display FPS matches Video FPS - perfect sync" << std::endl;
+            frame_rate_limiting_enabled_ = false;  // No frame skipping needed
         }
     } else {
         // fps == -1 or invalid: Use native video frame rate
         target_display_fps_ = frame_rate_;
+        frame_rate_limiting_enabled_ = false;  // Explicitly disable frame skipping
         std::cout << "DEBUG: FPS limiting disabled, using native video FPS: " << frame_rate_ << std::endl;
     }
 }
@@ -708,9 +714,18 @@ bool MediaPlayer::extract_next_frame() {
         video_pts_ = 0.0;
     }
     
-    // FIXED: When FPS limiting is active (target_display_fps_ < frame_rate_), 
-    // don't wait for "correct" timing - let the display FPS control handle timing
-    bool fps_limiting_active = (target_display_fps_ < frame_rate_);
+    // When frame rate limiting is active (target_display_fps_ < frame_rate_),
+    // we need to continue decoding frames at the native rate even when they won't be displayed
+    // Use ONLY the explicit frame_rate_limiting_enabled_ flag to be absolutely sure
+    bool fps_limiting_active = frame_rate_limiting_enabled_;
+    
+    // Log status periodically to ensure frames are being processed at native rate
+    static int frame_counter = 0;
+    if (++frame_counter % 300 == 0) { // Log every ~300 frames
+        std::cout << "Frame extraction: Processing at native rate (" << frame_rate_ 
+                  << " fps), FPS limiting " << (fps_limiting_active ? "ON" : "OFF")
+                  << ", Target display: " << target_display_fps_ << " fps" << std::endl;
+    }
     
     AVPacket packet;
     while (av_read_frame(format_context_, &packet) >= 0) {
@@ -732,8 +747,13 @@ bool MediaPlayer::extract_next_frame() {
                                 std::this_thread::sleep_for(std::chrono::duration<double>(wait_time));
                             }
                         }
+                    } else {
+                        // When FPS limiting is active, we don't pause for timing
+                        // Instead, we process frames as quickly as possible and let
+                        // should_display_frame() control which frames to actually show
+                        // This ensures that in window mode, frames are still processed
+                        // at the native rate even if displayed at a different rate
                     }
-                    // When FPS limiting is active, skip timing control and let should_display_frame() handle it
                     
                     // Update video clock with current frame PTS
                     video_pts_ = frame_pts;
@@ -1023,9 +1043,25 @@ void MediaPlayer::process_audio_frame_data(AVFrame* frame, AVCodecContext* codec
 }
 
 bool MediaPlayer::should_display_frame() {
-    // FIXED: Use steady_clock for more accurate timing and prevent drift
+    // Use steady_clock for more accurate timing and prevent drift
     static auto last_display_time = std::chrono::steady_clock::now();
+    static int frames_skipped = 0;
+    static int frames_displayed = 0;
+    static int frames_processed = 0;
+    static auto last_stats_time = std::chrono::steady_clock::now();
     auto now = std::chrono::steady_clock::now();
+    
+    // Always count processed frames regardless of display decision
+    frames_processed++;
+    
+    // IMPORTANT: When frame rate limiting is disabled, always display frames
+    // This is critical for:
+    // 1. When target FPS matches or exceeds native video FPS
+    // 2. When using SDL2 window display (which does its own frame rate limiting)
+    if (!frame_rate_limiting_enabled_) {
+        frames_displayed++;
+        return true;
+    }
     
     // Calculate time since last display
     auto time_since_last_display = std::chrono::duration_cast<std::chrono::microseconds>(now - last_display_time);
@@ -1036,7 +1072,57 @@ bool MediaPlayer::should_display_frame() {
     // If enough time has passed according to display FPS, we should display
     if (time_since_last_display >= target_interval) {
         last_display_time = now;
+        frames_displayed++;
+        
+        // Print frame skipping stats every 5 seconds
+        auto stats_elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_stats_time);
+        if (stats_elapsed.count() >= 5) {
+            // Always print stats for debugging purposes
+            double actual_display_fps = frames_displayed / static_cast<double>(stats_elapsed.count());
+            double actual_processed_fps = frames_processed / static_cast<double>(stats_elapsed.count());
+            
+            if (frame_rate_limiting_enabled_) {
+                double expected_skip_ratio = 1.0 - (target_display_fps_ / frame_rate_);
+                int expected_frames = static_cast<int>(frame_rate_ * stats_elapsed.count()); // Total frames in period
+                int expected_skipped = static_cast<int>(expected_frames * expected_skip_ratio);
+                
+                std::cout << "FRAME SKIP STATS: Displayed " << frames_displayed 
+                          << " frames, skipped " << frames_skipped 
+                          << " frames, processed " << frames_processed << " frames in "
+                          << stats_elapsed.count() << "s" << std::endl;
+                std::cout << "    Display FPS: " << actual_display_fps 
+                          << ", Processing FPS: " << actual_processed_fps
+                          << ", Target: " << target_display_fps_ 
+                          << ", Native: " << frame_rate_ << std::endl;
+                          
+                std::cout << "    Expected skip ratio: " << (expected_skip_ratio * 100) << "%, "
+                          << "Actual skip ratio: " << ((frames_processed - frames_displayed) * 100.0 / frames_processed) << "%"
+                          << std::endl;
+            } else {
+                std::cout << "FPS STATS: Displayed " << frames_displayed << " frames in "
+                          << stats_elapsed.count() << "s (Effective FPS: " << actual_display_fps
+                          << ", Target: " << target_display_fps_ << ")" << std::endl;
+            }
+            
+            frames_skipped = 0;
+            frames_displayed = 0;
+            frames_processed = 0;
+            last_stats_time = now;
+        }
+        
         return true;
+    }
+    
+    // Count skipped frames for diagnostics and print more detailed frame skip information
+    if (frame_rate_limiting_enabled_) {
+        frames_skipped++;
+        
+        // Every 50 skipped frames in a row, print a message to confirm frame skipping is working
+        if (frames_skipped % 50 == 0) {
+            std::cout << "Frame skipping active: Skipped " << frames_skipped 
+                      << " consecutive frames (Target FPS: " << target_display_fps_ 
+                      << ", Native FPS: " << frame_rate_ << ")" << std::endl;
+        }
     }
     
     return false;

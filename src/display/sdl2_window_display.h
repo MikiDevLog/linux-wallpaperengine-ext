@@ -38,6 +38,9 @@ public:
     // Event handling
     void handle_events();
     bool should_close() const;
+    
+    // Frame rate control
+    void set_target_fps(int fps);
 
 private:
     // Window properties
@@ -45,10 +48,13 @@ private:
     bool initialized_;
     bool visible_;
     bool should_close_;
+    int target_fps_; // Target frame rate for windowed mode
     
     // SDL2 objects
     SDL_Window* window_;
     SDL_Renderer* renderer_;
+    
+    // Texture for rendering
     SDL_Texture* current_texture_;
     
     // Rendering state

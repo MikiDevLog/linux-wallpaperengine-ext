@@ -5,6 +5,7 @@
 #include <memory>
 #include <clocale>
 #include <clocale>
+#include <SDL2/SDL.h>
 
 // Global application instance for signal handling
 std::unique_ptr<Application> g_app;
@@ -31,6 +32,10 @@ int main(int argc, char* argv[]) {
     try {
         // Set locale for numeric formatting consistency
         setlocale(LC_NUMERIC, "C");
+        
+        // Global VSync disabling for SDL2 before any SDL initialization
+        // This ensures frame rate control works correctly in windowed mode
+        SDL_SetHintWithPriority(SDL_HINT_RENDER_VSYNC, "0", SDL_HINT_OVERRIDE);
         
         print_version();
         std::cout << std::endl;

@@ -42,10 +42,18 @@ bool Application::initialize(const Config& config) {
         }
     }
     
-    // Configure FPS limiting
+    // Configure FPS limiting for the application
     target_fps_ = calculate_effective_fps();
     frame_duration_ = std::chrono::milliseconds(1000 / target_fps_);
     std::cout << "FPS limit set to " << target_fps_ << " (" << frame_duration_.count() << "ms per frame)" << std::endl;
+    
+    // FPS CONTROL ARCHITECTURE:
+    // 1. For desktop background mode (X11/Wayland): MediaPlayer::should_display_frame() controls frame skipping
+    // 2. For windowed mode (SDL2):
+    //    a. VSync is enabled when using native video FPS
+    //    b. VSync is disabled + SDL_Delay used when FPS limit is applied
+    //    c. MediaPlayer::should_display_frame() is used to control which frames to display
+    //    d. Both MediaPlayer and SDL2 use the same FPS target for consistency
     
     // Apply audio settings to media players
     apply_audio_settings();
@@ -98,10 +106,8 @@ bool Application::setup_window_mode() {
             std::cerr << "Warning: Failed to start video playback" << std::endl;
         }
         
-        // FIXED: Set FPS limit AFTER starting playback so native frame rate is detected
-        // This allows -1 (native frame rate) to work correctly for windowed mode
+        // Get the FPS setting from config
         int fps_setting = !config_.screen_configs.empty() ? config_.screen_configs[0].fps : config_.default_fps;
-        window_media_player_->set_fps_limit(fps_setting);
         
         // Set background with window-specific scaling
         ScalingMode scaling = parse_scaling_mode(config_.window_config.scaling);
@@ -109,6 +115,24 @@ bool Application::setup_window_mode() {
         
         // Use SDL2 window display (universal cross-platform solution)
         SDL2WindowDisplay* sdl2_display = dynamic_cast<SDL2WindowDisplay*>(window_output_.get());
+        
+        // If we're using an SDL2 window display, configure its frame rate control
+        if (sdl2_display) {
+            // For SDL2 window display, use both MediaPlayer's frame skipping and SDL2's rendering control
+            // 1. Configure SDL2's frame rate limiter for the rendering stage
+            sdl2_display->set_target_fps(fps_setting);
+            
+            // 2. Enable MediaPlayer's frame skipping logic to maintain proper video speed
+            window_media_player_->set_fps_limit(fps_setting);
+            
+            std::cout << "DEBUG: Using combined frame rate control for window mode: " 
+                      << (fps_setting <= 0 ? "Native video FPS with VSync" : std::to_string(fps_setting) + " FPS")
+                      << " (MediaPlayer skips frames, SDL2 renders displayed frames)"
+                      << std::endl;
+        } else {
+            // Non-SDL2 renderer - use MediaPlayer's frame rate limiting
+            window_media_player_->set_fps_limit(fps_setting);
+        }
         if (sdl2_display) {
             
             // For video content, start video playback for continuous animation
@@ -318,25 +342,53 @@ void Application::update_loop() {
                             break;
                         }
                         
-                        // FIXED VIDEO TIMING: Only decode frames when we need to display them
-                        // This prevents video from advancing faster than the display rate
-                        if (window_media_player_->should_display_frame()) {
-                            unsigned char* frame_data;
-                            int frame_width, frame_height;
-                            bool frame_available = false;
+                        // Process and decode frames
+                        unsigned char* frame_data;
+                        int frame_width, frame_height;
+                        bool frame_available = false;
+                        
+                        // With SDL2's frame rate control, we always display all decoded frames
+                        // IMPORTANT: We rely on the target_fps_ setting in SDL2WindowDisplay
+                        // to limit the frame rate and properly skip frames
+                        
+                        // Track frame processing metrics
+                        static int processed_frame_count = 0;
+                        static auto last_frame_count_time = std::chrono::steady_clock::now();
+                        auto now_time = std::chrono::steady_clock::now();
+                        
+                        // Always decode frames to keep video running at proper speed
+                        if (window_media_player_->get_video_frame_cpu(&frame_data, &frame_width, &frame_height)) {
+                            frame_available = true;
+                            processed_frame_count++;
+                        } else if (window_media_player_->get_video_frame_ffmpeg(&frame_data, &frame_width, &frame_height)) {
+                            frame_available = true;
+                            processed_frame_count++;
+                        }
+                        
+                        // Log frame processing rate every 5 seconds to verify proper speed
+                        auto frame_count_elapsed = std::chrono::duration_cast<std::chrono::seconds>(now_time - last_frame_count_time);
+                        if (frame_count_elapsed.count() >= 5) {
+                            double fps = static_cast<double>(processed_frame_count) / frame_count_elapsed.count();
+                            std::cout << "WINDOW MODE: Processed " << processed_frame_count 
+                                      << " frames in " << frame_count_elapsed.count() 
+                                      << "s (" << fps << " fps)" << std::endl;
+                            processed_frame_count = 0;
+                            last_frame_count_time = now_time;
+                        }
+                        
+                        // Use MediaPlayer's frame skipping logic to determine if this frame should be displayed
+                        // This ensures consistency between background mode and windowed mode
+                        if (frame_available && window_media_player_->should_display_frame()) {
+                            // Render the frame using SDL2's renderer
+                            sdl2_display->render_video_frame(frame_data, frame_width, frame_height, scaling);
                             
-                            // Only decode a new frame when it's time to display
-                            if (window_media_player_->get_video_frame_cpu(&frame_data, &frame_width, &frame_height)) {
-                                frame_available = true;
-                            } else if (window_media_player_->get_video_frame_ffmpeg(&frame_data, &frame_width, &frame_height)) {
-                                frame_available = true;
-                            }
-                            
-                            // Display the frame immediately since should_display_frame() returned true
-                            if (frame_available) {
-                                sdl2_display->render_video_frame(frame_data, frame_width, frame_height, scaling);
+                            // Add debug logging every 100 frames
+                            static int debug_frame_count = 0;
+                            if (++debug_frame_count % 100 == 0) {
+                                std::cout << "WINDOW MODE: Rendered frame " << debug_frame_count << std::endl;
                             }
                         }
+                        // NOTE: We always process frames to keep the video advancing at the native rate
                     }
                 } else if (window_media_player_->get_media_type() == MediaType::IMAGE) {
                     // For images, render immediately
