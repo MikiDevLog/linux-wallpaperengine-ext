@@ -4,4 +4,4 @@ A console application that outputs video, gifs and static images to the desktop 
 
 > **Note**: This project does NOT run Steam Workshop wallpapers or Wallpaper Engine content. It's a standalone application for displaying standard media files (videos, GIFs, images) as desktop backgrounds. For Steam Workshop wallpaper support, see [linux-wallpaperengine](https://github.com/Almamu/linux-wallpaperengine).
 
-# At the moment the project is in a state of half-readiness of GPU rendering and is very stuck because of GLE and MPV which I used relying on the reference on which the project was made, so I am switching to Vulcan+ffmpeg, stay tuned for updates.
+# At the moment the project is in a state of half-readiness of GPU rendering and is very stuck because of GLE and MPV which I used relying on the reference on which the project was made, so I am switching to Vulkan+ffmpeg, stay tuned for updates.
