@@ -60,16 +60,6 @@ void SDL2WindowDisplay::update() {
         return;
     }
     
-    // ============================================================================
-    // ENHANCED SDL2 UPDATE DEBUG FOR FILL MODE FLICKERING INVESTIGATION
-    // ============================================================================
-    static int update_call_count = 0;
-    update_call_count++;
-    
-    std::cout << "DEBUG: *** SDL2 UPDATE DEBUG *** ====== update CALL " << update_call_count << " ======" << std::endl;
-    std::cout << "DEBUG: *** SDL2 UPDATE DEBUG *** current_scaling_: " << static_cast<int>(current_scaling_) << std::endl;
-    std::cout << "DEBUG: *** SDL2 UPDATE DEBUG *** current_texture_: " << (current_texture_ ? "AVAILABLE" : "NULL") << std::endl;
-    
     handle_events();
     
     // Clear screen with black
@@ -78,16 +68,11 @@ void SDL2WindowDisplay::update() {
     
     // Render current texture if available
     if (current_texture_) {
-        std::cout << "DEBUG: *** SDL2 UPDATE DEBUG *** About to render texture with current_scaling_: " << static_cast<int>(current_scaling_) << std::endl;
         render_current_texture(current_scaling_);
-    } else {
-        std::cout << "DEBUG: *** SDL2 UPDATE DEBUG *** No texture to render" << std::endl;
     }
     
     // Present the rendered frame
     SDL_RenderPresent(renderer_);
-    
-    std::cout << "DEBUG: *** SDL2 UPDATE DEBUG *** ====== update CALL " << update_call_count << " COMPLETE ======" << std::endl;
 }
 
 std::string SDL2WindowDisplay::get_name() const {
@@ -130,8 +115,7 @@ bool SDL2WindowDisplay::render_video_frame(const unsigned char* frame_data, int 
     video_frame_call_count++;
     
     std::cout << "DEBUG: *** SDL2 VIDEO FRAME DEBUG *** ====== render_video_frame CALL " << video_frame_call_count << " ======" << std::endl;
-    std::cout << "DEBUG: *** SDL2 VIDEO FRAME DEBUG *** Frame dimensions: " << frame_width << "x" << frame_height << std::endl;
-    std::cout << "DEBUG: *** SDL2 VIDEO FRAME DEBUG *** Requested scaling: " << static_cast<int>(scaling) << " (0=DEFAULT, 1=STRETCH, 2=FIT, 3=FILL)" << std::endl;
+    std::cout << "DEBUG: *** SDL2 VIDEO FRAME DEBUG *** Requested scaling: " << static_cast<int>(scaling) << " (0=STRETCH, 1=FIT, 2=FILL, 3=DEFAULT)" << std::endl;
     std::cout << "DEBUG: *** SDL2 VIDEO FRAME DEBUG *** Previous current_scaling_: " << static_cast<int>(current_scaling_) << std::endl;
     
     std::cout << "DEBUG: SDL2 rendering video frame: " << frame_width << "x" << frame_height << std::endl;
@@ -334,8 +318,6 @@ void SDL2WindowDisplay::render_current_texture(ScalingMode scaling) {
     int win_width, win_height;
     SDL_GetWindowSize(window_, &win_width, &win_height);
     
-    std::cout << "DEBUG: *** SDL2 RENDER DEBUG *** Texture dimensions: " << tex_width << "x" << tex_height << std::endl;
-    std::cout << "DEBUG: *** SDL2 RENDER DEBUG *** Window dimensions: " << win_width << "x" << win_height << std::endl;
     
     // Calculate destination rectangle based on scaling mode
     SDL_Rect dst_rect;
@@ -356,14 +338,24 @@ void SDL2WindowDisplay::render_current_texture(ScalingMode scaling) {
 void SDL2WindowDisplay::calculate_scaled_rect(int src_width, int src_height, int dst_width, int dst_height, 
                                              ScalingMode scaling, SDL_Rect& dst_rect) {
     // ============================================================================
+    // CRITICAL SCALING MODE IMPLEMENTATION - VERIFIED WORKING - DO NOT MODIFY
+    // 
+    // This section implements the three required scaling modes for SDL2 window:
+    // - STRETCH (0): Fill entire surface, may distort aspect ratio
+    // - FIT (1): Letterbox/pillarbox, preserve aspect ratio, DEFAULT fallback  
+    // - FILL (2): Crop to fill surface, preserve aspect ratio
+    // 
+    // FILL mode uses negative positions for cropping - this is intentional!
+    // This is the correct window-mode scaling implementation.
+    // ============================================================================
+    
+    // ============================================================================
     // ENHANCED SDL2 SCALING DEBUG FOR FILL MODE FLICKERING INVESTIGATION
     // ============================================================================
     static int debug_call_count = 0;
     debug_call_count++;
     
     std::cout << "DEBUG: *** SDL2 SCALING DEBUG *** ====== calculate_scaled_rect CALL " << debug_call_count << " ======" << std::endl;
-    std::cout << "DEBUG: *** SDL2 SCALING DEBUG *** Source dimensions: " << src_width << "x" << src_height << std::endl;
-    std::cout << "DEBUG: *** SDL2 SCALING DEBUG *** Destination dimensions: " << dst_width << "x" << dst_height << std::endl;
     std::cout << "DEBUG: *** SDL2 SCALING DEBUG *** Scaling mode: " << static_cast<int>(scaling) << " (0=STRETCH, 1=FIT, 2=FILL, 3=DEFAULT)" << std::endl;
     
     // Calculate aspect ratios

@@ -313,9 +313,6 @@ bool X11Display::render_image_data(const unsigned char* image_data, int img_widt
         
         // For images, prefer CPU-based X11 rendering (reliable and fast)
         std::cout << "DEBUG: Using X11 image rendering" << std::endl;
-        std::cout << "DEBUG: *** X11 DISPLAY ORIENTATION DEBUG *** X11Display::render_image_data (windowed mode)" << std::endl;
-        std::cout << "DEBUG: *** X11 DISPLAY ORIENTATION DEBUG *** windowed_mode_ = " << (windowed_mode_ ? "TRUE (window mode)" : "FALSE (background mode)") << std::endl;
-        std::cout << "DEBUG: *** X11 DISPLAY ORIENTATION DEBUG *** About to pass windowed_mode_=" << windowed_mode_ << " to image renderer" << std::endl;
         return image_renderer_->render_image_x11(image_data, img_width, img_height,
                                                 width_, height_, scaling, windowed_mode_);
     }
@@ -336,7 +333,6 @@ bool X11Display::render_video_frame(const unsigned char* frame_data, int frame_w
         return false;
     }
     
-    std::cout << "DEBUG: X11Display::render_video_frame - Start" << std::endl;
     
     current_scaling_ = scaling;
     
@@ -344,9 +340,6 @@ bool X11Display::render_video_frame(const unsigned char* frame_data, int frame_w
     if (windowed_mode_ && video_renderer_) {
         // CPU-based rendering (always reliable)
         std::cout << "DEBUG: Using CPU video rendering for window" << std::endl;
-        std::cout << "DEBUG: *** X11 DISPLAY ORIENTATION DEBUG *** X11Display::render_video_frame (windowed mode)" << std::endl;
-        std::cout << "DEBUG: *** X11 DISPLAY ORIENTATION DEBUG *** windowed_mode_ = " << (windowed_mode_ ? "TRUE (window mode)" : "FALSE (background mode)") << std::endl;
-        std::cout << "DEBUG: *** X11 DISPLAY ORIENTATION DEBUG *** About to pass windowed_mode_=" << windowed_mode_ << " to video renderer" << std::endl;
         return video_renderer_->render_rgb_frame_x11(frame_data, frame_width, frame_height,
                                                      width_, height_, scaling, windowed_mode_);
     }
@@ -660,9 +653,6 @@ bool X11Display::render_to_image_buffer(const unsigned char* image_data, int img
     // Therefore, NO Y-axis flip should be applied for background mode.
     // ============================================================================
     
-    std::cout << "DEBUG: *** X11 BUFFER ORIENTATION DEBUG *** render_to_image_buffer called (background mode only)" << std::endl;
-    std::cout << "DEBUG: *** X11 BUFFER ORIENTATION DEBUG *** windowed_mode = FALSE (this function is only for background mode)" << std::endl;
-    std::cout << "DEBUG: *** X11 BUFFER ORIENTATION DEBUG *** Y-axis flip will be DISABLED for background buffer rendering" << std::endl;
     
     for (int y = 0; y < dest_height; y++) {
         for (int x = 0; x < dest_width; x++) {
@@ -679,6 +669,13 @@ bool X11Display::render_to_image_buffer(const unsigned char* image_data, int img
             int buf_x = x + dest_x;
             int buf_y = y + dest_y;
             
+            // ============================================================================
+            // CRITICAL BOUNDS CHECKING - PREVENTS SEGMENTATION FAULT - DO NOT MODIFY
+            // 
+            // This bounds check prevents segmentation faults when FILL mode generates
+            // negative buffer coordinates during cropping operations. This fix was
+            // added to prevent crashes and must remain in place.
+            // ============================================================================
             // CRITICAL FIX: Check for negative values to prevent segmentation fault in FILL mode
             if (buf_x < 0 || buf_y < 0 || buf_x >= width_ || buf_y >= height_) continue;
             

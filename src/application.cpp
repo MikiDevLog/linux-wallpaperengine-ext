@@ -96,16 +96,13 @@ bool Application::setup_window_mode() {
         ScalingMode scaling = parse_scaling_mode(config_.window_config.scaling);
         window_output_->set_background(config_.window_config.media_path, scaling);
         
-        std::cout << "DEBUG: Media type detected: " << static_cast<int>(window_media_player_->get_media_type()) << std::endl;
         
         // Use SDL2 window display (universal cross-platform solution)
         SDL2WindowDisplay* sdl2_display = dynamic_cast<SDL2WindowDisplay*>(window_output_.get());
         if (sdl2_display) {
-            std::cout << "DEBUG: Using SDL2 window display - setting up rendering" << std::endl;
             
             // For video content, start video playback for continuous animation
             if (window_media_player_->get_media_type() == MediaType::VIDEO) {
-                std::cout << "DEBUG: Setting up video playback for SDL2 window" << std::endl;
                 
                 // Start video playback for continuous animation
                 if (!window_media_player_->play()) {
@@ -129,7 +126,6 @@ bool Application::setup_window_mode() {
                 }
             }
         } else {
-            std::cout << "DEBUG: Non-SDL2 window display detected" << std::endl;
         }
         
         // Start playback
@@ -140,9 +136,7 @@ bool Application::setup_window_mode() {
 }
 
 bool Application::setup_screen_instances() {
-    std::cout << "DEBUG: Setting up " << config_.screen_configs.size() << " screen instances" << std::endl;
     for (size_t i = 0; i < config_.screen_configs.size(); i++) {
-        std::cout << "DEBUG: Screen config " << i << ": " << config_.screen_configs[i].screen_name << " with media: " << config_.screen_configs[i].media_path << std::endl;
     }
     
     screen_instances_.resize(config_.screen_configs.size());
@@ -161,7 +155,6 @@ bool Application::setup_screen_instances() {
 }
 
 bool Application::initialize_screen_instance(ScreenInstance& instance) {
-    std::cout << "DEBUG: Initializing screen instance for: " << instance.config.screen_name << std::endl;
     
     // Get display output
     instance.display_output = display_manager_.get_output_by_name(instance.config.screen_name);
@@ -189,7 +182,6 @@ bool Application::initialize_screen_instance(ScreenInstance& instance) {
         // Detect media type first
         MediaType media_type = instance.media_player->detect_media_type(instance.config.media_path);
         if (media_type == MediaType::VIDEO || media_type == MediaType::GIF) {
-            std::cout << "DEBUG: Video/GIF detected, will establish OpenGL context after layer surface is ready" << std::endl;
             // Note: We'll make EGL context current during the rendering phase when the surface is ready
         }
     }
@@ -221,37 +213,30 @@ bool Application::initialize_screen_instance(ScreenInstance& instance) {
         
         // Render image if it's a static image
         if (instance.media_player->get_media_type() == MediaType::IMAGE) {
-            std::cout << "DEBUG: Rendering image for screen instance: " << instance.config.screen_name << std::endl;
             WaylandDisplay* wayland_display = dynamic_cast<WaylandDisplay*>(instance.display_output.get());
             X11Display* x11_display = dynamic_cast<X11Display*>(instance.display_output.get());
             
             if (wayland_display) {
                 const unsigned char* image_data = instance.media_player->get_image_data();
                 if (image_data) {
-                    std::cout << "DEBUG: Image data available, rendering to Wayland background" << std::endl;
                     wayland_display->render_image_data(image_data, 
                                                       instance.media_player->get_width(),
                                                       instance.media_player->get_height(),
                                                       scaling);
                 } else {
-                    std::cout << "DEBUG: No image data available for Wayland background rendering" << std::endl;
                 }
             } else if (x11_display) {
                 const unsigned char* image_data = instance.media_player->get_image_data();
                 if (image_data) {
-                    std::cout << "DEBUG: Image data available, rendering to X11 background" << std::endl;
                     x11_display->render_image_data(image_data, 
                                                   instance.media_player->get_width(),
                                                   instance.media_player->get_height(),
                                                   scaling);
                 } else {
-                    std::cout << "DEBUG: No image data available for X11 background rendering" << std::endl;
                 }
             } else {
-                std::cout << "DEBUG: Unknown display type for screen instance" << std::endl;
             }
         } else if (instance.media_player->get_media_type() == MediaType::VIDEO) {
-            std::cout << "DEBUG: Video detected for screen instance: " << instance.config.screen_name << std::endl;
             // For videos, we need to render frames continuously in the update loop
             // Initial frame rendering will be handled in the update loop
         }
@@ -287,7 +272,6 @@ void Application::update_loop() {
     auto last_auto_mute_check = std::chrono::steady_clock::now();
     const auto auto_mute_check_interval = std::chrono::milliseconds(1000); // Check every second
     
-    std::cout << "DEBUG: Starting update loop for KDE Wayland compatibility" << std::endl;
     
     while (running_ && !should_exit_) {
         auto now = std::chrono::steady_clock::now();
@@ -297,6 +281,16 @@ void Application::update_loop() {
             if (window_media_player_) {
                 window_media_player_->update();
                 
+                // ============================================================================
+                // CRITICAL SCALING MODE PARSING FIX - PREVENTS FLICKERING - DO NOT MODIFY
+                // 
+                // This fix resolves the SDL2 window mode scaling flickering issue.
+                // BUG: Previously used config_.screen_configs[0].scaling (for background mode)
+                // FIX: Now correctly uses config_.window_config.scaling (for window mode)
+                // 
+                // This ensures command line --scaling argument is parsed correctly in window mode.
+                // Without this fix, scaling mode flickered between FILL(2) and DEFAULT(3).
+                // ============================================================================
                 // Render video frames continuously for windowed mode
                 // FIX: Use window_config.scaling instead of screen_configs[0].scaling for window mode
                 ScalingMode scaling = parse_scaling_mode(config_.window_config.scaling);
@@ -307,8 +301,6 @@ void Application::update_loop() {
                 static int app_update_call_count = 0;
                 app_update_call_count++;
                 
-                std::cout << "DEBUG: *** APP UPDATE DEBUG *** ====== Application update loop iteration " << app_update_call_count << " ======" << std::endl;
-                std::cout << "DEBUG: *** APP UPDATE DEBUG *** Parsed scaling mode: " << static_cast<int>(scaling) << " (0=STRETCH, 1=FIT, 2=FILL, 3=DEFAULT)" << std::endl;
                 
                 // Use SDL2 window display (universal solution)
                 SDL2WindowDisplay* sdl2_display = dynamic_cast<SDL2WindowDisplay*>(window_output_.get());
@@ -324,11 +316,8 @@ void Application::update_loop() {
                         unsigned char* frame_data;
                         int frame_width, frame_height;
                         if (window_media_player_->get_video_frame(&frame_data, &frame_width, &frame_height)) {
-                            std::cout << "DEBUG: *** APP UPDATE DEBUG *** About to call render_video_frame with scaling=" << static_cast<int>(scaling) << std::endl;
                             sdl2_display->render_video_frame(frame_data, frame_width, frame_height, scaling);
-                            std::cout << "DEBUG: *** APP UPDATE DEBUG *** render_video_frame completed" << std::endl;
                         } else {
-                            std::cout << "DEBUG: *** APP UPDATE DEBUG *** No video frame available" << std::endl;
                         }
                     }
                 } else if (window_media_player_->get_media_type() == MediaType::IMAGE) {
@@ -343,9 +332,7 @@ void Application::update_loop() {
                 }
             }
             if (window_output_) {
-                std::cout << "DEBUG: *** APP UPDATE DEBUG *** About to call window_output_->update()" << std::endl;
                 window_output_->update();
-                std::cout << "DEBUG: *** APP UPDATE DEBUG *** window_output_->update() completed" << std::endl;
             }
         } else {
             for (auto& instance : screen_instances_) {
@@ -362,7 +349,6 @@ void Application::update_loop() {
                             
                             if (wayland_display) {
                                 // PREFER CPU-based rendering for KDE Wayland stability
-                                std::cout << "DEBUG: Using CPU-based video rendering for KDE Wayland background" << std::endl;
                                 unsigned char* frame_data;
                                 int frame_width, frame_height;
                                 if (instance.media_player->get_video_frame_cpu(&frame_data, &frame_width, &frame_height)) {
@@ -402,7 +388,6 @@ void Application::update_loop() {
         std::this_thread::sleep_for(std::chrono::milliseconds(33)); // ~30 FPS update rate for better stability
     }
     
-    std::cout << "DEBUG: Update loop ended" << std::endl;
 }
 
 void Application::update_auto_mute() {

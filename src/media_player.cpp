@@ -33,8 +33,6 @@ bool MediaPlayer::initialize() {
         return true;
     }
     
-    std::cout << "DEBUG: Initializing MediaPlayer with pure FFmpeg backend" << std::endl;
-    
     // Initialize FFmpeg (only needs to be done once globally)
     static bool ffmpeg_initialized = false;
     if (!ffmpeg_initialized) {
@@ -43,11 +41,7 @@ bool MediaPlayer::initialize() {
         ffmpeg_initialized = true;
     }
     
-    // Use CPU-only video rendering for all video playback
-    std::cout << "DEBUG: Using CPU-only video rendering" << std::endl;
-    
     initialized_ = true;
-    std::cout << "DEBUG: MediaPlayer initialized successfully" << std::endl;
     return true;
 }
 
@@ -69,7 +63,6 @@ bool MediaPlayer::load_media(const std::string& media_path) {
         return false;
     }
     
-    std::cout << "DEBUG: Loading media: " << media_path << std::endl;
     
     // Clean up previous media
     cleanup_ffmpeg_decoder();
@@ -96,38 +89,32 @@ bool MediaPlayer::play() {
     }
     
     playing_ = true;
-    std::cout << "DEBUG: Starting video playback" << std::endl;
     return true;
 }
 
 bool MediaPlayer::pause() {
     playing_ = false;
-    std::cout << "DEBUG: Video playback paused" << std::endl;
     return true;
 }
 
 bool MediaPlayer::stop() {
     playing_ = false;
     current_time_ = 0.0;
-    std::cout << "DEBUG: Video playback stopped" << std::endl;
     return true;
 }
 
 void MediaPlayer::set_volume(int volume) {
     // Future implementation for audio integration
-    std::cout << "DEBUG: Volume set to " << volume << " (not implemented yet)" << std::endl;
 }
 
 void MediaPlayer::set_muted(bool muted) {
     // Future implementation for audio integration
-    std::cout << "DEBUG: Muted set to " << (muted ? "true" : "false") << " (not implemented yet)" << std::endl;
 }
 
 void MediaPlayer::set_fps_limit(int fps) {
     if (fps > 0) {
         frame_rate_ = static_cast<double>(fps);
         frame_duration_ = 1.0 / frame_rate_;
-        std::cout << "DEBUG: FPS limit set to " << fps << std::endl;
     }
 }
 
@@ -191,7 +178,6 @@ bool MediaPlayer::get_video_frame(unsigned char** frame_data, int* width, int* h
 bool MediaPlayer::set_x11_window(void* display, unsigned long window, int screen) {
     // Store X11 window context for potential video rendering integration
     // For now, this is a no-op since we're using FFmpeg CPU rendering
-    std::cout << "DEBUG: X11 window context set for MediaPlayer" << std::endl;
     return true;
 }
 
@@ -243,7 +229,6 @@ bool MediaPlayer::setup_ffmpeg_decoder() {
         return false;
     }
     
-    std::cout << "DEBUG: Setting up FFmpeg decoder for: " << current_media_ << std::endl;
     
     // Open input file
     if (avformat_open_input(&format_context_, current_media_.c_str(), nullptr, nullptr) < 0) {
@@ -349,7 +334,6 @@ bool MediaPlayer::setup_ffmpeg_decoder() {
     }
     
     decoder_initialized_ = true;
-    std::cout << "DEBUG: FFmpeg decoder setup complete for " << width_ << "x" << height_ << " @ " << frame_rate_ << " FPS" << std::endl;
     return true;
 }
 
@@ -385,7 +369,6 @@ void MediaPlayer::cleanup_ffmpeg_decoder() {
 }
 
 bool MediaPlayer::load_image_ffmpeg(const std::string& image_path) {
-    std::cout << "DEBUG: Loading image with FFmpeg: " << image_path << std::endl;
     
     AVFormatContext* format_ctx = nullptr;
     AVCodecContext* codec_ctx = nullptr;
@@ -483,7 +466,6 @@ bool MediaPlayer::load_image_ffmpeg(const std::string& image_path) {
                     sws_scale(sws_ctx, frame->data, frame->linesize, 0, height_,
                              rgb_frame->data, rgb_frame->linesize);
                     
-                    std::cout << "DEBUG: Image loaded successfully: " << width_ << "x" << height_ << std::endl;
                     av_packet_unref(&packet);
                     
                     // Cleanup temporary resources
@@ -510,7 +492,6 @@ cleanup:
 }
 
 bool MediaPlayer::load_video_ffmpeg(const std::string& video_path) {
-    std::cout << "DEBUG: Loading video with FFmpeg: " << video_path << std::endl;
     return setup_ffmpeg_decoder();
 }
 
@@ -596,9 +577,6 @@ bool MediaPlayer::get_video_frame_native(AVFrame** frame) {
                 
                 // Update timing
                 current_time_ += frame_duration_;
-                
-                std::cout << "DEBUG: Native frame extracted " << frame_->width << "x" << frame_->height 
-                          << " format=" << frame_->format << std::endl;
                 
                 return true;
             }

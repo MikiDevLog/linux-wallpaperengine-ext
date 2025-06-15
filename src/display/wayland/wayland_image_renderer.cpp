@@ -40,11 +40,6 @@ bool WaylandImageRenderer::render_image_shm(const unsigned char* image_data, int
         return false;
     }
     
-    std::cout << "DEBUG: WaylandImageRenderer::render_image_shm - Start" << std::endl;
-    std::cout << "DEBUG: Image dimensions: " << img_width << "x" << img_height << std::endl;
-    std::cout << "DEBUG: Surface dimensions: " << surface_width << "x" << surface_height << std::endl;
-    std::cout << "DEBUG: *** ORIENTATION DEBUG *** windowed_mode = " << (windowed_mode ? "TRUE (window mode)" : "FALSE (background mode)") << std::endl;
-    std::cout << "DEBUG: *** ORIENTATION DEBUG *** Y-axis flip will be " << (windowed_mode ? "ENABLED" : "DISABLED") << " for this render" << std::endl;
     
     // Clear the SHM buffer
     size_t buffer_size = surface_width * surface_height * 4;
@@ -68,7 +63,6 @@ bool WaylandImageRenderer::render_image_shm(const unsigned char* image_data, int
         delete[] resized_data;
     }
     
-    std::cout << "DEBUG: WaylandImageRenderer::render_image_shm - Complete" << std::endl;
     return true;
 }
 
@@ -277,9 +271,6 @@ void WaylandImageRenderer::apply_scaling_shm(const unsigned char* src_data, int 
                                             unsigned char* dst_data, int dst_width, int dst_height,
                                             ScalingMode scaling, bool windowed_mode) {
     std::cout << "DEBUG: Applying SHM scaling mode: " << static_cast<int>(scaling) << std::endl;
-    std::cout << "DEBUG: *** ORIENTATION DEBUG *** apply_scaling_shm called with windowed_mode = " << (windowed_mode ? "TRUE" : "FALSE") << std::endl;
-    std::cout << "DEBUG: *** ORIENTATION DEBUG *** Source dimensions: " << src_width << "x" << src_height << std::endl;
-    std::cout << "DEBUG: *** ORIENTATION DEBUG *** Destination dimensions: " << dst_width << "x" << dst_height << std::endl;
     
     // Calculate scaling parameters based on mode
     int render_width = dst_width;
@@ -344,8 +335,6 @@ void WaylandImageRenderer::apply_scaling_shm(const unsigned char* src_data, int 
     float x_ratio = static_cast<float>(src_width) / render_width;
     float y_ratio = static_cast<float>(src_height) / render_height;
     
-    std::cout << "DEBUG: *** ORIENTATION DEBUG *** Starting pixel copying loop with render dimensions: " << render_width << "x" << render_height << std::endl;
-    std::cout << "DEBUG: *** ORIENTATION DEBUG *** Scaling ratios - x_ratio: " << x_ratio << ", y_ratio: " << y_ratio << std::endl;
     
     // ============================================================================
     // CRITICAL Y-AXIS ORIENTATION FIX FOR WAYLAND SHM IMAGE RENDERING
@@ -377,12 +366,10 @@ void WaylandImageRenderer::apply_scaling_shm(const unsigned char* src_data, int 
                 int original_src_y = src_y;
                 src_y = src_height - 1 - src_y;
                 if (y < 5 && x < 5) { // Debug first few pixels
-                    std::cout << "DEBUG: *** ORIENTATION DEBUG *** Window mode Y-flip: original_src_y=" << original_src_y << " -> flipped_src_y=" << src_y << std::endl;
                 }
             } else {
                 // Background mode: Use normal Y coordinates (no flip needed)
                 if (y < 5 && x < 5) { // Debug first few pixels
-                    std::cout << "DEBUG: *** ORIENTATION DEBUG *** Background mode: using normal src_y=" << src_y << " (no flip)" << std::endl;
                 }
             }
             // ============================================================================

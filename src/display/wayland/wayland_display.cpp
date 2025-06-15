@@ -555,9 +555,6 @@ bool WaylandDisplay::render_image_data(const unsigned char* image_data, int img_
         return false;
     }
     
-    std::cout << "DEBUG: *** WAYLAND DISPLAY ORIENTATION DEBUG *** WaylandDisplay::render_image_data called" << std::endl;
-    std::cout << "DEBUG: *** WAYLAND DISPLAY ORIENTATION DEBUG *** windowed_mode_ = " << (windowed_mode_ ? "TRUE (window mode)" : "FALSE (background mode)") << std::endl;
-    std::cout << "DEBUG: *** WAYLAND DISPLAY ORIENTATION DEBUG *** About to pass windowed_mode_=" << windowed_mode_ << " to image renderer" << std::endl;
     
     current_scaling_ = scaling;
     bool result = false;
@@ -570,7 +567,6 @@ bool WaylandDisplay::render_image_data(const unsigned char* image_data, int img_
 
     // For images, prefer CPU-based SHM rendering (reliable and fast for static images)
     if (shm_data_) {
-        std::cout << "DEBUG: Using SHM image rendering" << std::endl;
         result = image_renderer_->render_image_shm(image_data, img_width, img_height,
                                                   shm_data_, width_, height_, scaling, windowed_mode_);
         
@@ -594,23 +590,9 @@ bool WaylandDisplay::render_video_frame(const unsigned char* frame_data, int fra
         return false;
     }
     
-    // Add detailed debugging for FILL mode issues - use static counter to track frame sequence
-    static int frame_counter = 0;
-    frame_counter++;
-    
-    std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** ====== FRAME " << frame_counter << " ======" << std::endl;
-    std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** WaylandDisplay::render_video_frame called" << std::endl;
-    std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** windowed_mode_ = " << (windowed_mode_ ? "TRUE (window mode)" : "FALSE (background mode)") << std::endl;
-    std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** scaling = " << static_cast<int>(scaling) << " (0=DEFAULT, 1=STRETCH, 2=FIT, 3=FILL)" << std::endl;
-    std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** frame_dimensions = " << frame_width << "x" << frame_height << std::endl;
-    std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** window_dimensions = " << width_ << "x" << height_ << std::endl;
-    std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** prefer_egl_ = " << (prefer_egl_ ? "TRUE" : "FALSE") << std::endl;
-    std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** shm_data_ = " << (shm_data_ ? "AVAILABLE" : "NULL") << std::endl;
-    std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** current_scaling_ = " << static_cast<int>(current_scaling_) << std::endl;
-    
-    // Check for scaling mode changes
+    // Check for scaling mode changes (only log when actually changing)
     if (current_scaling_ != scaling) {
-        std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** SCALING MODE CHANGED from " << static_cast<int>(current_scaling_) << " to " << static_cast<int>(scaling) << std::endl;
+        std::cout << "INFO: Scaling mode changed from " << static_cast<int>(current_scaling_) << " to " << static_cast<int>(scaling) << " (0=STRETCH, 1=FIT, 2=FILL, 3=DEFAULT)" << std::endl;
     }
     
     // Initialize video renderer if not already done
@@ -624,31 +606,15 @@ bool WaylandDisplay::render_video_frame(const unsigned char* frame_data, int fra
     
     // Use CPU-based SHM rendering (reliable and always works)
     if (shm_data_) {
-        std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** About to call video_renderer_->render_frame_data_shm" << std::endl;
-        std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** Parameters: frame=" << frame_width << "x" << frame_height << ", surface=" << width_ << "x" << height_ << ", scaling=" << static_cast<int>(scaling) << ", windowed=" << windowed_mode_ << std::endl;
-        std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** shm_data_ pointer = " << shm_data_ << std::endl;
-        std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** buffer_ pointer = " << buffer_ << std::endl;
-        std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** surface_ pointer = " << surface_ << std::endl;
-        
         result = video_renderer_->render_frame_data_shm(frame_data, frame_width, frame_height,
                                                        shm_data_, width_, height_, scaling, windowed_mode_);
         
-        std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** render_frame_data_shm returned " << (result ? "SUCCESS" : "FAILURE") << std::endl;
-        
         if (result && surface_) {
-            std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** About to attach buffer and commit surface" << std::endl;
-            std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** Attaching buffer with dimensions " << width_ << "x" << height_ << std::endl;
             wl_surface_attach(surface_, buffer_, 0, 0);
             wl_surface_damage(surface_, 0, 0, width_, height_);
-            std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** Committing surface for frame " << frame_counter << std::endl;
             wl_surface_commit(surface_);
-            std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** Surface committed successfully for frame " << frame_counter << std::endl;
-        } else {
-            std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** Skipping surface commit due to render failure or missing surface" << std::endl;
         }
     }
-    
-    std::cout << "DEBUG: *** WAYLAND FILL MODE DEBUG *** ====== FRAME " << frame_counter << " COMPLETE ======" << std::endl;
     
     if (!result) {
         std::cerr << "ERROR: All video rendering methods failed" << std::endl;
@@ -667,7 +633,6 @@ bool WaylandDisplay::render_video_enhanced(MediaPlayer* media_player, ScalingMod
     
     // Use CPU-based SHM rendering (reliable and always works)
     if (shm_data_) {
-        std::cout << "DEBUG: Using enhanced SHM video rendering (CPU-only)" << std::endl;
         unsigned char* frame_data = nullptr;
         int frame_width, frame_height;
         if (media_player->get_video_frame(&frame_data, &frame_width, &frame_height)) {
